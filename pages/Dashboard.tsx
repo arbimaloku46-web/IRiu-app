@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Project, User } from '../types';
-import { getProjects, saveProject, deleteProject } from '../services/storage';
+import { getProjects, saveProject, deleteProject, archiveProject, restoreProject } from '../services/storage';
 import { Button, Card, Input, Modal, Select, TextArea } from '../components/ui';
-import { Search, MapPin, ArrowRight, Phone, Mail, Plus, Trash2, Edit, Upload } from 'lucide-react';
+import { Search, MapPin, ArrowRight, Phone, Mail, Plus, Trash2, Edit, Upload, Archive, RotateCcw } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -18,7 +18,8 @@ const emptyProject: Project = {
   thumbnailUrl: '',
   clientAccessCode: '',
   status: 'Planning',
-  updates: []
+  updates: [],
+  isArchived: false
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onLogout }) => {
@@ -27,6 +28,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
   const [accessCode, setAccessCode] = useState('');
   
   // Admin State
+  const [showArchived, setShowArchived] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project>(emptyProject);
   const [thumbnailFile, setThumbnailFile] = useState<string>('');
@@ -39,10 +41,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
     setProjects(getProjects());
   };
 
-  const filteredProjects = projects.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.location.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter based on Search Term AND Archive Status
+  const filteredProjects = projects.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          p.location.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // If Admin and showing archived: show only archived
+    // If Admin and NOT showing archived: show only active
+    // If Client: show only active (clients never see archive)
+    const matchesArchiveStatus = user.role === 'admin' 
+      ? (showArchived ? p.isArchived : !p.isArchived)
+      : !p.isArchived;
+
+    return matchesSearch && matchesArchiveStatus;
+  });
 
   const handleAccessCodeSubmit = (project: Project) => {
     if (accessCode === project.clientAccessCode || user.role === 'admin') {
@@ -71,9 +83,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
     setThumbnailFile('');
   };
 
-  const handleDeleteProject = (id: string, e: React.MouseEvent) => {
+  const handleArchiveProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm("Are you sure you want to delete this project? This cannot be undone.")) {
+    if (window.confirm("Move this project to the Archive? It will be hidden from all clients.")) {
+      archiveProject(id);
+      refreshProjects();
+    }
+  };
+
+  const handleRestoreProject = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Restore this project to Active status? Clients will be able to view it again.")) {
+      restoreProject(id);
+      refreshProjects();
+    }
+  };
+
+  const handlePermanentDelete = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("WARNING: This will PERMANENTLY delete the project and all its data. This cannot be undone.")) {
       deleteProject(id);
       refreshProjects();
     }
@@ -126,12 +154,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
 
       <main className="max-w-7xl mx-auto p-4 sm:p-8 flex-1 w-full">
         <div className="mb-6 sm:mb-10 flex flex-col md:flex-row gap-4 sm:gap-6 justify-between items-start md:items-center">
-          <h2 className="text-3xl sm:text-4xl font-bold text-[#002147]">Active Projects</h2>
+          <div>
+             <h2 className="text-3xl sm:text-4xl font-bold text-[#002147]">
+               {showArchived ? 'Archived Projects' : 'Active Projects'}
+             </h2>
+             {user.role === 'admin' && (
+                <button 
+                  onClick={() => setShowArchived(!showArchived)}
+                  className="flex items-center gap-2 text-[#2264ab] font-bold mt-2 hover:underline text-sm sm:text-base"
+                >
+                  {showArchived ? (
+                    <><ArrowRight size={16} /> Back to Active Projects</>
+                  ) : (
+                    <><Archive size={16} /> View Archived Projects</>
+                  )}
+                </button>
+             )}
+          </div>
           <div className="relative w-full md:w-[400px]">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 sm:w-6 sm:h-6" />
             <input 
               className="w-full pl-10 sm:pl-12 pr-6 py-3 sm:py-4 rounded-2xl border border-gray-200 bg-white text-base sm:text-lg focus:ring-4 focus:ring-[#89cff0]/30 outline-none shadow-sm transition-all"
-              placeholder="Search projects..."
+              placeholder={showArchived ? "Search archive..." : "Search projects..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -144,16 +188,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
               
               {user.role === 'admin' && (
                 <div className="absolute top-4 left-4 z-20 flex gap-2">
-                  <button onClick={(e) => openEditModal(project, e)} className="bg-white/90 p-2 rounded-full text-[#002147] hover:bg-[#2264ab] hover:text-white transition shadow-lg">
+                  <button onClick={(e) => openEditModal(project, e)} className="bg-white/90 p-2 rounded-full text-[#002147] hover:bg-[#2264ab] hover:text-white transition shadow-lg" title="Edit">
                     <Edit size={16} />
                   </button>
-                  <button onClick={(e) => handleDeleteProject(project.id, e)} className="bg-white/90 p-2 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg">
-                    <Trash2 size={16} />
-                  </button>
+                  
+                  {showArchived ? (
+                    <>
+                      <button onClick={(e) => handleRestoreProject(project.id, e)} className="bg-white/90 p-2 rounded-full text-green-600 hover:bg-green-600 hover:text-white transition shadow-lg" title="Restore to Active">
+                        <RotateCcw size={16} />
+                      </button>
+                      <button onClick={(e) => handlePermanentDelete(project.id, e)} className="bg-white/90 p-2 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg" title="Permanently Delete">
+                        <Trash2 size={16} />
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={(e) => handleArchiveProject(project.id, e)} className="bg-white/90 p-2 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg" title="Archive (Hide from Clients)">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               )}
 
-              <div className="relative h-56 sm:h-64 bg-gray-200 overflow-hidden">
+              <div className={`relative h-56 sm:h-64 bg-gray-200 overflow-hidden ${showArchived ? 'grayscale' : ''}`}>
                 <img src={project.thumbnailUrl} alt={project.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 <div className="absolute top-4 right-4 bg-[#002147]/90 backdrop-blur text-white text-xs sm:text-sm font-bold px-3 py-1.5 rounded-full shadow-lg">
                   {project.status}
@@ -187,7 +243,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
                   </div>
                 ) : (
                   <Button onClick={() => onSelectProject(project)} className="w-full mt-auto">
-                    Manage Project
+                    {showArchived ? 'View Details' : 'Manage Project'}
                   </Button>
                 )}
               </div>
@@ -195,7 +251,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
           ))}
           {filteredProjects.length === 0 && (
             <div className="col-span-full text-center py-24 text-gray-400 text-lg">
-              No projects found. {user.role === 'admin' ? 'Create one to get started.' : 'Check back later.'}
+              {showArchived 
+                ? 'No archived projects found.' 
+                : (user.role === 'admin' ? 'No active projects. Create one or check the archive.' : 'No active projects found.')}
             </div>
           )}
         </div>

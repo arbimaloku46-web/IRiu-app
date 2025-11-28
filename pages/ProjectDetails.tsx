@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Project, WeeklyUpdate, User, MediaItem } from '../types';
 import { Button, Card, Modal, Input, TextArea, Select } from '../components/ui';
-import { ArrowLeft, Box, Video, Camera, FileText, BrainCircuit, Play, ChevronDown, ChevronUp, Phone, Mail, Upload, Link as LinkIcon, Plus, X } from 'lucide-react';
+import { ArrowLeft, Box, Video, Camera, FileText, BrainCircuit, Play, ChevronDown, ChevronUp, Phone, Mail, Upload, Link as LinkIcon, Plus, X, Trash2, Pencil, Calendar } from 'lucide-react';
 import { analyzeProjectProgress } from '../services/geminiService';
 import ReactMarkdown from 'react-markdown';
 
@@ -10,9 +10,10 @@ interface ProjectDetailsProps {
   user: User;
   onBack: () => void;
   onUpdateProject: (p: Project) => void;
+  onDeleteProject: (id: string) => void;
 }
 
-export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, onBack, onUpdateProject }) => {
+export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, onBack, onUpdateProject, onDeleteProject }) => {
   const [activeTab, setActiveTab] = useState<'updates' | 'ai'>('updates');
   const [expandedUpdate, setExpandedUpdate] = useState<string | null>(project.updates[0]?.id || null);
   
@@ -21,10 +22,13 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
   const [aiResponse, setAiResponse] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
-  // Admin: Add Update State
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newUpdateDesc, setNewUpdateDesc] = useState('');
-  const [newUpdateWeek, setNewUpdateWeek] = useState((project.updates.length + 1).toString());
+  // Admin: Add/Edit Update State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null); // If null, we are adding new
+  
+  const [updateDesc, setUpdateDesc] = useState('');
+  const [updateWeek, setUpdateWeek] = useState('');
+  const [updateDate, setUpdateDate] = useState('');
   
   // Admin: Media Management
   const [pendingMedia, setPendingMedia] = useState<MediaItem[]>([]);
@@ -56,7 +60,8 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
   // Helper to extract src from iframe code if user pastes full embed code
   const processEmbedCode = (input: string) => {
     if (input.includes('<iframe')) {
-       const srcMatch = input.match(/src="([^"]+)"/);
+       // Support both single and double quotes, and varying spaces
+       const srcMatch = input.match(/src=['"]([^'"]+)['"]/);
        return srcMatch ? srcMatch[1] : input;
     }
     return input;
@@ -96,34 +101,77 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
     setMediaTitle('');
     setMediaUrlInput('');
     setMediaFileBase64('');
-    // Keep type and input type same for convenience
   };
 
   const removePendingMedia = (id: string) => {
     setPendingMedia(pendingMedia.filter(m => m.id !== id));
   };
 
-  const handleAddUpdate = () => {
-    const newUpdate: WeeklyUpdate = {
-      id: Date.now().toString(),
-      weekNumber: parseInt(newUpdateWeek),
-      date: new Date().toISOString().split('T')[0],
-      description: newUpdateDesc,
-      media: pendingMedia
+  const openAddModal = () => {
+    setEditingUpdateId(null);
+    setUpdateWeek((project.updates.length + 1).toString());
+    setUpdateDate(new Date().toISOString().split('T')[0]);
+    setUpdateDesc('');
+    setPendingMedia([]);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (update: WeeklyUpdate, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingUpdateId(update.id);
+    setUpdateWeek(update.weekNumber.toString());
+    setUpdateDate(update.date);
+    setUpdateDesc(update.description);
+    setPendingMedia([...update.media]); // Clone existing media to avoid direct mutation
+    setIsModalOpen(true);
+  };
+
+  const handleSaveUpdate = () => {
+    if (!updateWeek || !updateDesc) {
+      alert("Week number and description are required.");
+      return;
+    }
+
+    const updateData: WeeklyUpdate = {
+      id: editingUpdateId || Date.now().toString(),
+      weekNumber: parseInt(updateWeek),
+      date: updateDate || new Date().toISOString().split('T')[0],
+      description: updateDesc,
+      media: [...pendingMedia] // Ensure we copy the array
     };
     
+    let updatedUpdates: WeeklyUpdate[];
+
+    if (editingUpdateId) {
+      // Edit existing
+      updatedUpdates = project.updates.map(u => u.id === editingUpdateId ? updateData : u);
+    } else {
+      // Add new
+      updatedUpdates = [updateData, ...project.updates];
+    }
+    
+    // Sort updates by week number descending (newest week first)
+    updatedUpdates.sort((a, b) => b.weekNumber - a.weekNumber);
+
     const updatedProject = {
       ...project,
-      updates: [newUpdate, ...project.updates]
+      updates: updatedUpdates
     };
     
     onUpdateProject(updatedProject);
-    setIsAddModalOpen(false);
-    setNewUpdateDesc('');
-    setPendingMedia([]);
-    setMediaTitle('');
-    setMediaUrlInput('');
-    setMediaFileBase64('');
+    setIsModalOpen(false);
+  };
+
+  const handleDeleteUpdate = (updateId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Are you sure you want to delete this weekly update? This action cannot be undone.")) {
+      const updatedUpdates = project.updates.filter(u => u.id !== updateId);
+      const updatedProject = {
+        ...project,
+        updates: updatedUpdates
+      };
+      onUpdateProject(updatedProject);
+    }
   };
 
   const toggleUpdate = (id: string) => {
@@ -142,9 +190,14 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
              <p className="text-base text-[#89cff0] font-medium mt-1">{project.location} • {project.status}</p>
           </div>
           {user.role === 'admin' && (
-            <Button onClick={() => setIsAddModalOpen(true)} variant="secondary" className="text-base px-6">
-              Add Weekly Update
-            </Button>
+            <div className="flex gap-3">
+              <Button onClick={() => onDeleteProject(project.id)} variant="danger" className="px-3" title="Archive Project (Hide from Clients)">
+                <Trash2 size={20} />
+              </Button>
+              <Button onClick={openAddModal} variant="secondary" className="text-base px-6">
+                <Plus size={18} /> Add Update
+              </Button>
+            </div>
           )}
         </div>
       </header>
@@ -177,14 +230,36 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
               project.updates.map((update) => (
                 <Card key={update.id} className={`transition-all duration-300 ${expandedUpdate === update.id ? 'ring-2 ring-[#89cff0]' : ''}`}>
                   <div 
-                    className="flex justify-between items-center cursor-pointer select-none py-2"
+                    className="flex justify-between items-start sm:items-center cursor-pointer select-none py-2 gap-4"
                     onClick={() => toggleUpdate(update.id)}
                   >
-                    <div>
-                      <h3 className="text-2xl font-bold text-[#002147] mb-1">Week {update.weekNumber}</h3>
-                      <p className="text-base text-gray-500 font-medium">{update.date}</p>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                         <h3 className="text-2xl font-bold text-[#002147]">Week {update.weekNumber}</h3>
+                         {user.role === 'admin' && (
+                           <div className="flex gap-1 ml-2">
+                             <button 
+                               onClick={(e) => openEditModal(update, e)}
+                               className="p-2 hover:bg-gray-100 rounded-full text-[#2264ab] transition-colors"
+                               title="Edit Update"
+                             >
+                               <Pencil size={18} />
+                             </button>
+                             <button 
+                               onClick={(e) => handleDeleteUpdate(update.id, e)}
+                               className="p-2 hover:bg-red-50 rounded-full text-red-500 transition-colors"
+                               title="Delete Update"
+                             >
+                               <Trash2 size={18} />
+                             </button>
+                           </div>
+                         )}
+                      </div>
+                      <p className="text-base text-gray-500 font-medium flex items-center gap-2">
+                        <Calendar size={14} /> {update.date}
+                      </p>
                     </div>
-                    <button className={`bg-gray-100 p-3 rounded-full text-[#2264ab] transition-transform duration-300 ${expandedUpdate === update.id ? 'rotate-180 bg-[#2264ab]/10' : ''}`}>
+                    <button className={`bg-gray-100 p-3 rounded-full text-[#2264ab] transition-transform duration-300 shrink-0 ${expandedUpdate === update.id ? 'rotate-180 bg-[#2264ab]/10' : ''}`}>
                       <ChevronDown className="w-6 h-6" />
                     </button>
                   </div>
@@ -309,33 +384,43 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
         </div>
       </footer>
 
-      {/* Admin Add Update Modal */}
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Add Weekly Update">
+      {/* Admin Add/Edit Update Modal */}
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingUpdateId ? "Edit Weekly Update" : "Add Weekly Update"}>
          <div className="space-y-6">
-           <Input 
-             label="Week Number" 
-             type="number" 
-             value={newUpdateWeek} 
-             onChange={(e) => setNewUpdateWeek(e.target.value)} 
-           />
+           <div className="grid grid-cols-2 gap-4">
+             <Input 
+               label="Week Number" 
+               type="number" 
+               value={updateWeek} 
+               onChange={(e) => setUpdateWeek(e.target.value)} 
+             />
+             <Input 
+               label="Date" 
+               type="date" 
+               value={updateDate} 
+               onChange={(e) => setUpdateDate(e.target.value)} 
+             />
+           </div>
+
            <TextArea 
              label="Description" 
-             value={newUpdateDesc}
-             onChange={(e) => setNewUpdateDesc(e.target.value)}
+             value={updateDesc}
+             onChange={(e) => setUpdateDesc(e.target.value)}
              placeholder="Detail the construction progress for this week..."
+             rows={6}
            />
            
            <div className="border-t border-gray-200 pt-6">
-              <h3 className="text-lg font-bold text-[#002147] mb-4">Add Media</h3>
-              <div className="bg-gray-50 p-4 rounded-2xl space-y-4">
+              <h3 className="text-lg font-bold text-[#002147] mb-4">Media Attachments</h3>
+              <div className="bg-gray-50 p-4 rounded-2xl space-y-4 border border-gray-100">
                 <Input 
-                  label="Media Title" 
+                  label="Title" 
                   value={mediaTitle} 
                   onChange={(e) => setMediaTitle(e.target.value)} 
-                  placeholder="e.g., Drone Footage or Floor Scan"
+                  placeholder="e.g., Drone Footage, 3D Scan"
                 />
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Select 
                     label="Media Type"
                     value={mediaType}
@@ -390,7 +475,7 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
                 )}
 
                 <Button onClick={addMediaToPending} variant="secondary" className="w-full h-10 py-0 text-sm">
-                  <Plus size={16} /> Add to Update
+                  <Plus size={16} /> Add to List
                 </Button>
               </div>
            </div>
@@ -398,28 +483,32 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
            {/* Pending Media List */}
            {pendingMedia.length > 0 && (
               <div className="space-y-2">
-                 <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Attachments ({pendingMedia.length})</h4>
-                 {pendingMedia.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
-                       <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden">
-                             {m.type === 'image' && <img src={m.url} className="w-full h-full object-cover" />}
-                             {m.type !== 'image' && <div className="w-full h-full flex items-center justify-center text-gray-400"><LinkIcon size={16}/></div>}
-                          </div>
-                          <div>
-                             <p className="font-bold text-sm text-[#002147]">{m.title}</p>
-                             <p className="text-xs text-gray-500">{m.type}</p>
-                          </div>
-                       </div>
-                       <button onClick={() => removePendingMedia(m.id)} className="text-red-400 hover:text-red-600 p-2">
-                         <X size={18} />
-                       </button>
-                    </div>
-                 ))}
+                 <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Attachments in this Update ({pendingMedia.length})</h4>
+                 <div className="space-y-2">
+                   {pendingMedia.map((m) => (
+                      <div key={m.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                         <div className="flex items-center gap-3 overflow-hidden">
+                            <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden shrink-0">
+                               {m.type === 'image' && <img src={m.url} className="w-full h-full object-cover" />}
+                               {m.type !== 'image' && <div className="w-full h-full flex items-center justify-center text-gray-400"><LinkIcon size={16}/></div>}
+                            </div>
+                            <div className="min-w-0">
+                               <p className="font-bold text-sm text-[#002147] truncate">{m.title}</p>
+                               <p className="text-xs text-gray-500">{m.type}</p>
+                            </div>
+                         </div>
+                         <button onClick={() => removePendingMedia(m.id)} className="text-red-400 hover:text-red-600 p-2 shrink-0">
+                           <X size={18} />
+                         </button>
+                      </div>
+                   ))}
+                 </div>
               </div>
            )}
 
-           <Button onClick={handleAddUpdate} className="w-full">Post Update</Button>
+           <Button onClick={handleSaveUpdate} className="w-full">
+             {editingUpdateId ? "Save Changes" : "Post Update"}
+           </Button>
          </div>
       </Modal>
     </div>

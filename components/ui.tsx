@@ -1,24 +1,19 @@
 import React from 'react';
 import { Loader2, ChevronDown } from 'lucide-react';
 
-interface ButtonProps {
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children?: React.ReactNode;
-  onClick?: () => void;
   variant?: 'primary' | 'secondary' | 'danger' | 'outline';
-  className?: string;
-  type?: 'button' | 'submit';
-  disabled?: boolean;
   isLoading?: boolean;
 }
 
 export const Button: React.FC<ButtonProps> = ({ 
   children, 
-  onClick, 
   variant = 'primary', 
   className = '', 
-  type = 'button',
-  disabled = false,
-  isLoading = false
+  isLoading = false,
+  disabled,
+  ...props
 }) => {
   const baseStyle = "px-4 sm:px-6 py-3 sm:py-3.5 rounded-xl sm:rounded-2xl font-semibold text-base sm:text-lg transition-all duration-300 flex items-center justify-center gap-2 sm:gap-3 transform active:scale-95";
   const variants = {
@@ -30,10 +25,9 @@ export const Button: React.FC<ButtonProps> = ({
 
   return (
     <button 
-      type={type}
-      className={`${baseStyle} ${variants[variant]} ${className} ${disabled ? 'opacity-50 cursor-not-allowed transform-none' : ''}`}
-      onClick={onClick}
+      className={`${baseStyle} ${variants[variant]} ${className} ${disabled || isLoading ? 'opacity-50 cursor-not-allowed transform-none' : ''}`}
       disabled={disabled || isLoading}
+      {...props}
     >
       {isLoading && <Loader2 className="w-5 h-5 animate-spin" />}
       {children}
@@ -136,13 +130,16 @@ export const Select: React.FC<SelectProps> = ({
   </div>
 );
 
-interface CardProps {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children?: React.ReactNode;
   className?: string;
 }
 
-export const Card: React.FC<CardProps> = ({ children, className = "" }) => (
-  <div className={`bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 sm:p-8 border border-gray-100 ${className}`}>
+export const Card: React.FC<CardProps> = ({ children, className = "", ...props }) => (
+  <div 
+    className={`bg-white rounded-[1.5rem] sm:rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 sm:p-8 border border-gray-100 ${className}`}
+    {...props}
+  >
     {children}
   </div>
 );

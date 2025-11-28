@@ -1,62 +1,10 @@
 import { Project, User, UserRole } from "../types";
 
-const PROJECTS_KEY = 'ndertimi_projects';
-const USERS_KEY = 'ndertimi_users';
+const PROJECTS_KEY = 'ndertimi_v2_fresh';
+const USERS_KEY = 'ndertimi_users_v2';
 
-// Seed data
-const initialProjects: Project[] = [
-  {
-    id: '1',
-    name: 'Emerald Tower',
-    location: 'Tirana, Albania',
-    description: 'A 25-story luxury residential complex with integrated smart home features.',
-    thumbnailUrl: 'https://picsum.photos/800/600',
-    clientAccessCode: 'EMERALD123',
-    status: 'Structure',
-    updates: [
-      {
-        id: 'u1',
-        weekNumber: 10,
-        date: '2024-05-15',
-        description: 'Completed the pouring of the 15th-floor slab. Installation of HVAC ducts on floors 1-5 has commenced.',
-        media: [
-          { id: 'm1', type: 'image', url: 'https://picsum.photos/800/600?random=1', title: 'Slab Pouring' },
-          { id: 'm2', type: '3d-polycam', url: '#', title: 'Week 10 Scan' }
-        ]
-      },
-      {
-        id: 'u2',
-        weekNumber: 11,
-        date: '2024-05-22',
-        description: 'Structural columns for floor 16 are being reinforced. Facade sample testing approved by client.',
-        media: [
-          { id: 'm3', type: 'image', url: 'https://picsum.photos/800/600?random=2', title: 'Column Reinforcement' },
-          { id: 'm4', type: '360-floorfy', url: '#', title: 'Lobby 360 View' }
-        ]
-      }
-    ]
-  },
-  {
-    id: '2',
-    name: 'Sunny Side Apartments',
-    location: 'Durrës, Albania',
-    description: 'Beachfront residential units with underground parking.',
-    thumbnailUrl: 'https://picsum.photos/800/600?random=10',
-    clientAccessCode: 'SUNNY456',
-    status: 'Foundation',
-    updates: [
-      {
-        id: 'u3',
-        weekNumber: 1,
-        date: '2024-06-01',
-        description: 'Excavation complete. Laying of foundation rebar initiated.',
-        media: [
-          { id: 'm5', type: 'video', url: '#', title: 'Drone Overview' }
-        ]
-      }
-    ]
-  }
-];
+// Seed data - Empty to start fresh
+const initialProjects: Project[] = [];
 
 export const getProjects = (): Project[] => {
   const stored = localStorage.getItem(PROJECTS_KEY);
@@ -78,6 +26,25 @@ export const saveProject = (project: Project): void => {
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
 };
 
+export const archiveProject = (id: string): void => {
+  const projects = getProjects();
+  const index = projects.findIndex(p => p.id === id);
+  if (index >= 0) {
+    projects[index].isArchived = true;
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  }
+};
+
+export const restoreProject = (id: string): void => {
+  const projects = getProjects();
+  const index = projects.findIndex(p => p.id === id);
+  if (index >= 0) {
+    projects[index].isArchived = false;
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  }
+};
+
+// Permanently delete
 export const deleteProject = (id: string): void => {
   const projects = getProjects().filter(p => p.id !== id);
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));

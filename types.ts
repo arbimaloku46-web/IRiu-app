@@ -31,6 +31,7 @@ export interface Project {
   clientAccessCode: string; // Code clients use to "claim" or view this project
   updates: WeeklyUpdate[];
   status: 'Planning' | 'Foundation' | 'Structure' | 'Finishing' | 'Completed';
+  isArchived?: boolean;
 }
 
 export interface AuthState {

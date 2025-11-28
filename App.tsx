@@ -3,7 +3,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { ProjectDetails } from './pages/ProjectDetails';
 import { User, Project } from './types';
-import { saveProject } from './services/storage';
+import { saveProject, archiveProject } from './services/storage';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -23,6 +23,13 @@ const App: React.FC = () => {
     setCurrentProject(updatedProject);
   };
 
+  const handleDeleteProject = (projectId: string) => {
+    if (window.confirm("Are you sure you want to archive this project?\n\nIt will be hidden from all clients immediately and moved to the 'Archived' section.")) {
+      archiveProject(projectId);
+      setCurrentProject(null);
+    }
+  };
+
   // Simple State-based Routing
   if (!user) {
     return <Login onLogin={handleLogin} />;
@@ -35,6 +42,7 @@ const App: React.FC = () => {
         user={user} 
         onBack={() => setCurrentProject(null)} 
         onUpdateProject={handleUpdateProject}
+        onDeleteProject={handleDeleteProject}
       />
     );
   }
