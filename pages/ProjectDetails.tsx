@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Project, WeeklyUpdate, User, MediaItem } from '../types';
 import { Button, Card, Modal, Input, TextArea, Select } from '../components/ui';
-import { ArrowLeft, Box, Video, Camera, FileText, BrainCircuit, Play, ChevronDown, ChevronUp, Phone, Mail, Upload, Link as LinkIcon, Plus, X, Trash2, Pencil, Calendar } from 'lucide-react';
+import { ArrowLeft, Box, Video, Camera, FileText, BrainCircuit, Play, ChevronDown, ChevronUp, Phone, Mail, Upload, Link as LinkIcon, Plus, X, Trash2, Pencil, Calendar, Loader2 } from 'lucide-react';
 import { analyzeProjectProgress } from '../services/geminiService';
 import ReactMarkdown from 'react-markdown';
 
@@ -9,13 +9,16 @@ interface ProjectDetailsProps {
   project: Project;
   user: User;
   onBack: () => void;
-  onUpdateProject: (p: Project) => void;
-  onDeleteProject: (id: string) => void;
+  onUpdateProject: (p: Project) => Promise<void>;
+  onDeleteProject: (id: string) => Promise<void>;
 }
 
 export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, onBack, onUpdateProject, onDeleteProject }) => {
+  // Ensure updates is always an array
+  const updates = project.updates || [];
+  
   const [activeTab, setActiveTab] = useState<'updates' | 'ai'>('updates');
-  const [expandedUpdate, setExpandedUpdate] = useState<string | null>(project.updates[0]?.id || null);
+  const [expandedUpdate, setExpandedUpdate] = useState<string | null>(updates[0]?.id || null);
   
   // AI State
   const [aiQuery, setAiQuery] = useState('');
@@ -24,6 +27,7 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
 
   // Admin: Add/Edit Update State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null); // If null, we are adding new
   
   const [updateDesc, setUpdateDesc] = useState('');
@@ -109,7 +113,7 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
 
   const openAddModal = () => {
     setEditingUpdateId(null);
-    setUpdateWeek((project.updates.length + 1).toString());
+    setUpdateWeek((updates.length + 1).toString());
     setUpdateDate(new Date().toISOString().split('T')[0]);
     setUpdateDesc('');
     setPendingMedia([]);
@@ -126,51 +130,62 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
     setIsModalOpen(true);
   };
 
-  const handleSaveUpdate = () => {
+  const handleSaveUpdate = async () => {
     if (!updateWeek || !updateDesc) {
       alert("Week number and description are required.");
       return;
     }
 
-    const updateData: WeeklyUpdate = {
-      id: editingUpdateId || Date.now().toString(),
-      weekNumber: parseInt(updateWeek),
-      date: updateDate || new Date().toISOString().split('T')[0],
-      description: updateDesc,
-      media: [...pendingMedia] // Ensure we copy the array
-    };
-    
-    let updatedUpdates: WeeklyUpdate[];
+    setIsSaving(true);
+    try {
+      const updateData: WeeklyUpdate = {
+        id: editingUpdateId || Date.now().toString(),
+        weekNumber: parseInt(updateWeek),
+        date: updateDate || new Date().toISOString().split('T')[0],
+        description: updateDesc,
+        media: [...pendingMedia] // Ensure we copy the array
+      };
+      
+      let updatedUpdates: WeeklyUpdate[];
+      // Use the safe 'updates' local variable which defaults to []
+      if (editingUpdateId) {
+        updatedUpdates = updates.map(u => u.id === editingUpdateId ? updateData : u);
+      } else {
+        updatedUpdates = [updateData, ...updates];
+      }
+      
+      // Sort updates by week number descending (newest week first)
+      updatedUpdates.sort((a, b) => b.weekNumber - a.weekNumber);
 
-    if (editingUpdateId) {
-      // Edit existing
-      updatedUpdates = project.updates.map(u => u.id === editingUpdateId ? updateData : u);
-    } else {
-      // Add new
-      updatedUpdates = [updateData, ...project.updates];
-    }
-    
-    // Sort updates by week number descending (newest week first)
-    updatedUpdates.sort((a, b) => b.weekNumber - a.weekNumber);
-
-    const updatedProject = {
-      ...project,
-      updates: updatedUpdates
-    };
-    
-    onUpdateProject(updatedProject);
-    setIsModalOpen(false);
-  };
-
-  const handleDeleteUpdate = (updateId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm("Are you sure you want to delete this weekly update? This action cannot be undone.")) {
-      const updatedUpdates = project.updates.filter(u => u.id !== updateId);
       const updatedProject = {
         ...project,
         updates: updatedUpdates
       };
-      onUpdateProject(updatedProject);
+      
+      await onUpdateProject(updatedProject);
+      setIsModalOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to save update.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteUpdate = async (updateId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Are you sure you want to delete this weekly update? This action cannot be undone.")) {
+      try {
+        const updatedUpdates = updates.filter(u => u.id !== updateId);
+        const updatedProject = {
+          ...project,
+          updates: updatedUpdates
+        };
+        await onUpdateProject(updatedProject);
+      } catch (e) {
+        console.error(e);
+        alert("Failed to delete update.");
+      }
     }
   };
 
@@ -222,12 +237,12 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
 
         {activeTab === 'updates' && (
           <div className="space-y-8">
-            {project.updates.length === 0 ? (
+            {updates.length === 0 ? (
                <div className="text-center py-24 text-gray-400 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-lg">
                  No updates available yet. Check back soon!
                </div>
             ) : (
-              project.updates.map((update) => (
+              updates.map((update) => (
                 <Card key={update.id} className={`transition-all duration-300 ${expandedUpdate === update.id ? 'ring-2 ring-[#89cff0]' : ''}`}>
                   <div 
                     className="flex justify-between items-start sm:items-center cursor-pointer select-none py-2 gap-4"
@@ -506,7 +521,7 @@ export const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, o
               </div>
            )}
 
-           <Button onClick={handleSaveUpdate} className="w-full">
+           <Button onClick={handleSaveUpdate} className="w-full" isLoading={isSaving}>
              {editingUpdateId ? "Save Changes" : "Post Update"}
            </Button>
          </div>

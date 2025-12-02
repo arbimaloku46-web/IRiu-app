@@ -11,6 +11,11 @@ export const analyzeProjectProgress = async (project: Project, specificQuery?: s
     return "AI Analysis unavailable: API Key missing.";
   }
 
+  // Safety check: ensure project updates exist
+  if (!project.updates || project.updates.length === 0) {
+    return "No weekly updates available to analyze yet.";
+  }
+
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     

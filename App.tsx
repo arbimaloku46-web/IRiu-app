@@ -18,15 +18,25 @@ const App: React.FC = () => {
     setCurrentProject(null);
   };
 
-  const handleUpdateProject = (updatedProject: Project) => {
-    saveProject(updatedProject);
-    setCurrentProject(updatedProject);
+  const handleUpdateProject = async (updatedProject: Project) => {
+    try {
+      await saveProject(updatedProject);
+      setCurrentProject(updatedProject);
+    } catch (error) {
+      console.error("Failed to update project:", error);
+      alert("Failed to save changes. Please try again.");
+    }
   };
 
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     if (window.confirm("Are you sure you want to archive this project?\n\nIt will be hidden from all clients immediately and moved to the 'Archived' section.")) {
-      archiveProject(projectId);
-      setCurrentProject(null);
+      try {
+        await archiveProject(projectId);
+        setCurrentProject(null);
+      } catch (error) {
+        console.error("Failed to archive project:", error);
+        alert("Failed to archive project.");
+      }
     }
   };
 

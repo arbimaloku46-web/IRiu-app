@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Project, User } from '../types';
 import { getProjects, saveProject, deleteProject, archiveProject, restoreProject } from '../services/storage';
 import { Button, Card, Input, Modal, Select, TextArea } from '../components/ui';
-import { Search, MapPin, ArrowRight, Phone, Mail, Plus, Trash2, Edit, Upload, Archive, RotateCcw } from 'lucide-react';
+import { Search, MapPin, ArrowRight, Phone, Mail, Plus, Trash2, Edit, Upload, Archive, RotateCcw, Loader2 } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -10,7 +10,8 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-const emptyProject: Project = {
+// Factory function to ensure a fresh object is created each time
+const getEmptyProject = (): Project => ({
   id: '',
   name: '',
   location: '',
@@ -20,26 +21,38 @@ const emptyProject: Project = {
   status: 'Planning',
   updates: [],
   isArchived: false
-};
+});
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onLogout }) => {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [accessCode, setAccessCode] = useState('');
+  
+  // Independent access codes state per project ID
+  const [accessCodes, setAccessCodes] = useState<Record<string, string>>({});
   
   // Admin State
   const [showArchived, setShowArchived] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingProject, setEditingProject] = useState<Project>(emptyProject);
+  const [editingProject, setEditingProject] = useState<Project>(getEmptyProject());
   const [thumbnailFile, setThumbnailFile] = useState<string>('');
 
-  useEffect(() => {
-    setProjects(getProjects());
-  }, []);
-
-  const refreshProjects = () => {
-    setProjects(getProjects());
+  const loadProjects = async () => {
+    setIsLoading(true);
+    try {
+      const data = await getProjects();
+      setProjects(data);
+    } catch (error) {
+      console.error("Failed to load projects:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
 
   // Filter based on Search Term AND Archive Status
   const filteredProjects = projects.filter(p => {
@@ -56,59 +69,106 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
     return matchesSearch && matchesArchiveStatus;
   });
 
+  const handleAccessCodeChange = (projectId: string, code: string) => {
+    setAccessCodes(prev => ({ ...prev, [projectId]: code }));
+  };
+
   const handleAccessCodeSubmit = (project: Project) => {
-    if (accessCode === project.clientAccessCode || user.role === 'admin') {
+    const enteredCode = accessCodes[project.id] || '';
+    if (enteredCode === project.clientAccessCode || user.role === 'admin') {
       onSelectProject(project);
     } else {
       alert("Invalid Access Code");
     }
   };
 
-  const handleSaveProject = () => {
-    if (!editingProject.name || !editingProject.clientAccessCode) {
-      alert("Name and Access Code are required");
+  const handleSaveProject = async () => {
+    // Explicit Validation
+    if (!editingProject.name || editingProject.name.trim() === '') {
+      alert("Please enter a Project Name.");
+      return;
+    }
+    if (!editingProject.clientAccessCode || editingProject.clientAccessCode.trim() === '') {
+      alert("Please enter a Client Access Code.");
       return;
     }
 
-    const projectToSave: Project = {
-      ...editingProject,
-      id: editingProject.id || Date.now().toString(),
-      thumbnailUrl: thumbnailFile || editingProject.thumbnailUrl || 'https://picsum.photos/800/600',
-    };
+    try {
+      setIsSaving(true);
+      // Determine ID: use existing or generate new
+      const projectId = editingProject.id || Date.now().toString();
 
-    saveProject(projectToSave);
-    refreshProjects();
-    setIsModalOpen(false);
-    setEditingProject(emptyProject);
-    setThumbnailFile('');
-  };
+      const projectToSave: Project = {
+        ...editingProject,
+        id: projectId,
+        // Use uploaded file, or existing value, or default fallback
+        thumbnailUrl: thumbnailFile || editingProject.thumbnailUrl || 'https://picsum.photos/800/600',
+        updates: Array.isArray(editingProject.updates) ? editingProject.updates : [], // Safety check
+        // If editing, keep existing archive status. If creating, force false.
+        isArchived: editingProject.id ? (!!editingProject.isArchived) : false,
+      };
 
-  const handleArchiveProject = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm("Move this project to the Archive? It will be hidden from all clients.")) {
-      archiveProject(id);
-      refreshProjects();
+      await saveProject(projectToSave);
+      
+      // Success actions
+      await loadProjects();
+      setIsModalOpen(false);
+      
+      // Reset State
+      setEditingProject(getEmptyProject());
+      setThumbnailFile('');
+      
+    } catch (error) {
+      console.error("Error creating/saving project:", error);
+      alert("An error occurred while saving the project. Please check the console.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleRestoreProject = (id: string, e: React.MouseEvent) => {
+  const handleArchiveProject = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (window.confirm("Move this project to the Archive? It will be hidden from all clients.")) {
+      try {
+        await archiveProject(id);
+        await loadProjects();
+        setIsModalOpen(false); 
+      } catch (err) {
+        console.error(err);
+        alert("Failed to archive project.");
+      }
+    }
+  };
+
+  const handleRestoreProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm("Restore this project to Active status? Clients will be able to view it again.")) {
-      restoreProject(id);
-      refreshProjects();
+      try {
+        await restoreProject(id);
+        await loadProjects();
+      } catch (err) {
+        console.error(err);
+        alert("Failed to restore project.");
+      }
     }
   };
 
-  const handlePermanentDelete = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handlePermanentDelete = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (window.confirm("WARNING: This will PERMANENTLY delete the project and all its data. This cannot be undone.")) {
-      deleteProject(id);
-      refreshProjects();
+      try {
+        await deleteProject(id);
+        await loadProjects();
+        setIsModalOpen(false);
+      } catch (err) {
+        console.error(err);
+        alert("Failed to delete project.");
+      }
     }
   };
 
   const openCreateModal = () => {
-    setEditingProject(emptyProject);
+    setEditingProject(getEmptyProject());
     setThumbnailFile('');
     setIsModalOpen(true);
   };
@@ -182,81 +242,104 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-          {filteredProjects.map(project => (
-            <Card key={project.id} className="overflow-hidden hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] transition-all duration-300 border-0 p-0 flex flex-col h-full group relative">
-              
-              {user.role === 'admin' && (
-                <div className="absolute top-4 left-4 z-20 flex gap-2">
-                  <button onClick={(e) => openEditModal(project, e)} className="bg-white/90 p-2 rounded-full text-[#002147] hover:bg-[#2264ab] hover:text-white transition shadow-lg" title="Edit">
-                    <Edit size={16} />
-                  </button>
-                  
-                  {showArchived ? (
-                    <>
-                      <button onClick={(e) => handleRestoreProject(project.id, e)} className="bg-white/90 p-2 rounded-full text-green-600 hover:bg-green-600 hover:text-white transition shadow-lg" title="Restore to Active">
-                        <RotateCcw size={16} />
-                      </button>
-                      <button onClick={(e) => handlePermanentDelete(project.id, e)} className="bg-white/90 p-2 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg" title="Permanently Delete">
-                        <Trash2 size={16} />
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={(e) => handleArchiveProject(project.id, e)} className="bg-white/90 p-2 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg" title="Archive (Hide from Clients)">
-                      <Trash2 size={16} />
+        {isLoading ? (
+          <div className="flex justify-center py-20">
+            <Loader2 className="w-10 h-10 text-[#002147] animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+            {filteredProjects.map(project => (
+              <Card key={project.id} className="overflow-hidden hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] transition-all duration-300 border-0 p-0 flex flex-col h-full group relative">
+                
+                {user.role === 'admin' && (
+                  <div className="absolute top-4 left-4 z-40 flex gap-2">
+                    <button 
+                      onClick={(e) => openEditModal(project, e)} 
+                      className="bg-white p-2.5 rounded-full text-[#002147] hover:bg-[#2264ab] hover:text-white transition shadow-lg border border-gray-100" 
+                      title="Edit"
+                    >
+                      <Edit size={18} />
                     </button>
+                    
+                    {showArchived ? (
+                      <>
+                        <button 
+                          onClick={(e) => handleRestoreProject(project.id, e)} 
+                          className="bg-white p-2.5 rounded-full text-green-600 hover:bg-green-600 hover:text-white transition shadow-lg border border-gray-100" 
+                          title="Restore to Active"
+                        >
+                          <RotateCcw size={18} />
+                        </button>
+                        <button 
+                          onClick={(e) => handlePermanentDelete(project.id, e)} 
+                          className="bg-white p-2.5 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg border border-gray-100" 
+                          title="Permanently Delete"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </>
+                    ) : (
+                      <button 
+                        onClick={(e) => handleArchiveProject(project.id, e)} 
+                        className="bg-white p-2.5 rounded-full text-red-600 hover:bg-red-600 hover:text-white transition shadow-lg border border-gray-100" 
+                        title="Archive (Hide from Clients)"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className={`relative h-56 sm:h-64 bg-gray-200 overflow-hidden ${showArchived ? 'grayscale' : ''}`}>
+                  <img src={project.thumbnailUrl} alt={project.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  <div className="absolute top-4 right-4 bg-[#002147]/90 backdrop-blur text-white text-xs sm:text-sm font-bold px-3 py-1.5 rounded-full shadow-lg z-10">
+                    {project.status}
+                  </div>
+                </div>
+                <div className="p-6 sm:p-8 flex-1 flex flex-col">
+                  <h3 className="text-xl sm:text-2xl font-bold text-[#002147] mb-2 sm:mb-3">{project.name}</h3>
+                  <div className="flex items-center gap-2 text-gray-500 mb-4 sm:mb-5">
+                    <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-[#2264ab]" />
+                    <span className="text-sm sm:text-base font-medium">{project.location}</span>
+                  </div>
+                  <p className="text-gray-600 text-sm sm:text-base leading-relaxed mb-6 sm:mb-8 line-clamp-3 flex-1">{project.description}</p>
+                  
+                  {user.role === 'client' ? (
+                    <div className="mt-auto pt-4 sm:pt-6 border-t border-gray-100">
+                       <p className="text-xs sm:text-sm font-semibold text-gray-500 mb-2 sm:mb-3">Enter Project Code to View</p>
+                       <div className="flex gap-2 sm:gap-3">
+                         <input 
+                           type="text" 
+                           className="flex-1 border border-gray-300 rounded-xl px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base focus:ring-2 focus:ring-[#2264ab] outline-none" 
+                           placeholder="Code..."
+                           value={accessCodes[project.id] || ''}
+                           onChange={(e) => handleAccessCodeChange(project.id, e.target.value)}
+                         />
+                         <button 
+                           onClick={() => handleAccessCodeSubmit(project)}
+                           className="bg-[#2264ab] text-white px-4 sm:px-5 rounded-xl hover:bg-[#002147] transition-colors shadow-lg shadow-[#2264ab]/20"
+                         >
+                           <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
+                         </button>
+                       </div>
+                    </div>
+                  ) : (
+                    <Button onClick={() => onSelectProject(project)} className="w-full mt-auto">
+                      {showArchived ? 'View Details' : 'Manage Project'}
+                    </Button>
                   )}
                 </div>
-              )}
-
-              <div className={`relative h-56 sm:h-64 bg-gray-200 overflow-hidden ${showArchived ? 'grayscale' : ''}`}>
-                <img src={project.thumbnailUrl} alt={project.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute top-4 right-4 bg-[#002147]/90 backdrop-blur text-white text-xs sm:text-sm font-bold px-3 py-1.5 rounded-full shadow-lg">
-                  {project.status}
-                </div>
+              </Card>
+            ))}
+            {filteredProjects.length === 0 && (
+              <div className="col-span-full text-center py-24 text-gray-400 text-lg">
+                {showArchived 
+                  ? 'No archived projects found.' 
+                  : (user.role === 'admin' ? 'No active projects. Create one or check the archive.' : 'No active projects found.')}
               </div>
-              <div className="p-6 sm:p-8 flex-1 flex flex-col">
-                <h3 className="text-xl sm:text-2xl font-bold text-[#002147] mb-2 sm:mb-3">{project.name}</h3>
-                <div className="flex items-center gap-2 text-gray-500 mb-4 sm:mb-5">
-                  <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-[#2264ab]" />
-                  <span className="text-sm sm:text-base font-medium">{project.location}</span>
-                </div>
-                <p className="text-gray-600 text-sm sm:text-base leading-relaxed mb-6 sm:mb-8 line-clamp-3 flex-1">{project.description}</p>
-                
-                {user.role === 'client' ? (
-                  <div className="mt-auto pt-4 sm:pt-6 border-t border-gray-100">
-                     <p className="text-xs sm:text-sm font-semibold text-gray-500 mb-2 sm:mb-3">Enter Project Code to View</p>
-                     <div className="flex gap-2 sm:gap-3">
-                       <input 
-                         type="text" 
-                         className="flex-1 border border-gray-300 rounded-xl px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base focus:ring-2 focus:ring-[#2264ab] outline-none" 
-                         placeholder="Code..."
-                         onChange={(e) => setAccessCode(e.target.value)}
-                       />
-                       <button 
-                         onClick={() => handleAccessCodeSubmit(project)}
-                         className="bg-[#2264ab] text-white px-4 sm:px-5 rounded-xl hover:bg-[#002147] transition-colors shadow-lg shadow-[#2264ab]/20"
-                       >
-                         <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
-                       </button>
-                     </div>
-                  </div>
-                ) : (
-                  <Button onClick={() => onSelectProject(project)} className="w-full mt-auto">
-                    {showArchived ? 'View Details' : 'Manage Project'}
-                  </Button>
-                )}
-              </div>
-            </Card>
-          ))}
-          {filteredProjects.length === 0 && (
-            <div className="col-span-full text-center py-24 text-gray-400 text-lg">
-              {showArchived 
-                ? 'No archived projects found.' 
-                : (user.role === 'admin' ? 'No active projects. Create one or check the archive.' : 'No active projects found.')}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </main>
 
       <footer className="bg-white border-t border-gray-200 mt-12 py-8 sm:py-10">
@@ -348,10 +431,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onSelectProject, onL
             </div>
           </div>
 
-          <div className="pt-4">
-             <Button onClick={handleSaveProject} className="w-full">
+          <div className="pt-4 flex flex-col gap-3">
+             <Button type="button" onClick={handleSaveProject} className="w-full" isLoading={isSaving}>
                {editingProject.id ? "Save Changes" : "Create Project"}
              </Button>
+             
+             {/* Delete Option within Modal for better Accessibility */}
+             {editingProject.id && (
+                <Button 
+                  type="button"
+                  onClick={() => handleArchiveProject(editingProject.id)} 
+                  variant="danger" 
+                  className="w-full mt-2"
+                >
+                  <Trash2 size={18} /> Archive / Delete Project
+                </Button>
+             )}
           </div>
         </div>
       </Modal>
