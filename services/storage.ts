@@ -51,20 +51,30 @@ export const saveProject = async (project: Project): Promise<void> => {
 };
 
 export const archiveProject = async (id: string): Promise<void> => {
-  const projects = await getProjects();
-  const project = projects.find(p => p.id === id);
-  if (project) {
-    project.isArchived = true;
-    await saveProject(project);
+  try {
+    const projects = await getProjects();
+    const project = projects.find(p => p.id === id);
+    if (project) {
+      project.isArchived = true;
+      await saveProject(project);
+    }
+  } catch (error) {
+    console.error("Failed to archive project:", error);
+    throw error;
   }
 };
 
 export const restoreProject = async (id: string): Promise<void> => {
-  const projects = await getProjects();
-  const project = projects.find(p => p.id === id);
-  if (project) {
-    project.isArchived = false;
-    await saveProject(project);
+  try {
+    const projects = await getProjects();
+    const project = projects.find(p => p.id === id);
+    if (project) {
+      project.isArchived = false;
+      await saveProject(project);
+    }
+  } catch (error) {
+    console.error("Failed to restore project:", error);
+    throw error;
   }
 };
 
